@@ -80,7 +80,7 @@ $(OBJS_ROOT_DIR)%.o: %.c $(LOCAL_HEAD_FILES)
 
 $(TARGET):$(OBJS) 
 	@$(ECHO) "[armeabi] SharedLibrary  : "$@ 
-	@$(CC) -fPIC -shared $^ -o $@ $(LDFLAGS) $(CXXFLAGS) ../obj/Main.o
+	@$(CC) -fPIC -shared $^ -o $@ $(LDFLAGS) $(CXXFLAGS) 
 	
 prepare: 
 	@$(ECHO) "[armeabi] GCC            : "$(CC) 
