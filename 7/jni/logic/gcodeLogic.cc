@@ -19,7 +19,7 @@
 #include "gcodes.h"
 #include "json/json.h"
 #include "qoi.h"
-
+#include "thumbnail.h"
 
 void Hardware_serial_transmission(const std::string& data) ;
 
@@ -126,7 +126,7 @@ typedef struct {
 	int width;
 	int height;
 	int offset;
-
+	string format;
 } Thumbnails;
 static Thumbnails Thumbnails_set;
 //用于设置界面显示选项
@@ -784,7 +784,7 @@ void IPaddress(string strLine){
 	      Current_Temperature.clear();
 	      if (obj.isArray()) {
 	        for (Json::ArrayIndex i = 0; i < obj.size(); ++i) {
-	        	sprintf(buf,"%0.2f",atof(obj[i].asString().c_str()));
+	        	sprintf(buf,"%0.0f",atof(obj[i].asString().c_str()));
 	        	Current_Temperature.push_back(buf); //获得值储存
 	        }
 	      }
@@ -795,7 +795,7 @@ void IPaddress(string strLine){
 	      Target_Temperature.clear();
 	      if (obj.isArray()) {
 	        for (Json::ArrayIndex i = 0; i < obj.size(); ++i) {
-	        	sprintf(buf,"%0.2f",atof(obj[i].asString().c_str()));
+	        	sprintf(buf,"%0.0f",atof(obj[i].asString().c_str()));
 	        	Target_Temperature.push_back( buf); //获得值储存
 	        }
 	      }
@@ -840,13 +840,18 @@ void IPaddress(string strLine){
 	               Hardware_serial_transmission(buf);
 				   QOIUtils::set_qoi_image(mTextView9Ptr, Thumbnails_set.data.c_str());//解析当前的缩略图数据//Parse the current thumbnail data
 
-			   }
-			   else{ //已经接收完所有的QOI数据
-				     //After receiving all QOI data
-				     QOIUtils::set_qoi_image(mTextView9Ptr, Thumbnails_set.data.c_str());//解析缩略图数据//Parse Thumbnail Data
-				     Thumbnails_set.data.clear();                                        //清理缩略图数据//Clean up thumbnail data
-				     Thumbnails_set.fileName.clear();                                    //清理文件名        //clean filename
-			       }
+			   }else{ //已经接收完所有的QOI数据
+					 //After receiving all QOI data
+				   if(Thumbnails_set.format == "qoi"){
+						QOIUtils::set_qoi_image(mTextView9Ptr, Thumbnails_set.data.c_str());//解析缩略图数据//Parse Thumbnail Data
+						Thumbnails_set.data.clear();                                        //清理缩略图数据//Clean up thumbnail data
+						Thumbnails_set.fileName.clear();                                    //清理文件名        //clean filename
+
+				   }else if(Thumbnails_set.format == "png"){
+					   make_thumbnail(Thumbnails_set.data);
+					   mTextView9Ptr->setBackgroundPic("/tmp/Print_Thumbnails.png");
+				   }
+		       }
 
 		   }
 
@@ -869,27 +874,32 @@ void IPaddress(string strLine){
 	          {
 	        	  Json::Value& root = obj[i];
 
-		        	  if (root.isMember("width")){//获得缩略图宽度 //get thumbnail width
-		        		  Thumbnails_set.width = root["width"].asInt();
-		        	  }
-		        	  if (root.isMember("height")){//获得缩略图高度 //get thumbnail height
-		        		  Thumbnails_set.height = root["height"].asInt();
-		        	  }
+//		        	  if (root.isMember("width")){//获得缩略图宽度 //get thumbnail width
+//		        		  Thumbnails_set.width = root["width"].asInt();
+//		        	  }
+//		        	  if (root.isMember("height")){//获得缩略图高度 //get thumbnail height
+//		        		  Thumbnails_set.height = root["height"].asInt();
+//		        	  }
+	        	  
+				  if (root.isMember("format")){//获得缩略图首次偏移量 //get thumbnail first offset
+	        		  Thumbnails_set.format = root["format"].asString();
+	        	  }
+
 		        	  if (root.isMember("offset")){//获得缩略图首次偏移量 //get thumbnail first offset
 		        		  Thumbnails_set.offset = root["offset"].asInt();
 		        	  }
 	            }
 
-			  LayoutPosition Thumbnails_get_pos = mTextView9Ptr->getPosition();               //获取要设置预览控件的坐标 //Get the coordinates of the preview control to set
-			  int middle_point_x = Thumbnails_get_pos.mLeft  +  Thumbnails_get_pos.mWidth/2;  //计算要设置预览控件的中心点X坐标 //Calculate the X coordinate of the center point of the preview control to be set
-			  int middle_point_y = Thumbnails_get_pos.mTop   +  Thumbnails_get_pos.mHeight/2; //计算要设置预览控件的中心点Y坐标 //Calculate the Y coordinate of the center point of the preview control to be set
-
-			  int point_x_Thumbnails = middle_point_x - Thumbnails_set.width/2;     //根据缩略图宽度计算要设置预览控件的X坐标 //Calculate the X coordinate to set the preview control based on the thumbnail width
-			  int point_y_Thumbnails = middle_point_y - Thumbnails_set.height/2;    //根据缩略图宽度计算要设置预览控件的Y坐标 //Calculate the y coordinate to set the preview control based on the thumbnail width
-			  //准备设置预览图位置以及大小
-			  //Prepare to set the preview position and size
-			  LayoutPosition Thumbnails_set_pos( point_x_Thumbnails , point_y_Thumbnails , Thumbnails_set.width, Thumbnails_set.height);
-			   mTextView9Ptr->setPosition(Thumbnails_set_pos);//设置预览图位置以及大小 //Set the preview position and size
+//			  LayoutPosition Thumbnails_get_pos = mTextView9Ptr->getPosition();               //获取要设置预览控件的坐标 //Get the coordinates of the preview control to set
+//			  int middle_point_x = Thumbnails_get_pos.mLeft  +  Thumbnails_get_pos.mWidth/2;  //计算要设置预览控件的中心点X坐标 //Calculate the X coordinate of the center point of the preview control to be set
+//			  int middle_point_y = Thumbnails_get_pos.mTop   +  Thumbnails_get_pos.mHeight/2; //计算要设置预览控件的中心点Y坐标 //Calculate the Y coordinate of the center point of the preview control to be set
+//
+//			  int point_x_Thumbnails = middle_point_x - Thumbnails_set.width/2;     //根据缩略图宽度计算要设置预览控件的X坐标 //Calculate the X coordinate to set the preview control based on the thumbnail width
+//			  int point_y_Thumbnails = middle_point_y - Thumbnails_set.height/2;    //根据缩略图宽度计算要设置预览控件的Y坐标 //Calculate the y coordinate to set the preview control based on the thumbnail width
+//			  //准备设置预览图位置以及大小
+//			  //Prepare to set the preview position and size
+//			  LayoutPosition Thumbnails_set_pos( point_x_Thumbnails , point_y_Thumbnails , Thumbnails_set.width, Thumbnails_set.height);
+//			   mTextView9Ptr->setPosition(Thumbnails_set_pos);//设置预览图位置以及大小 //Set the preview position and size
 			   //合成M36.1命令以获取预览图数据
 			   //Synthesize M36.1 commands to get preview image data
 	          sprintf(buf,"M36.1 P\"%s\" S%d\r\n",Thumbnails_set.fileName.c_str()+2,Thumbnails_set.offset);
