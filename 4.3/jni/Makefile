@@ -35,7 +35,7 @@ OBJS_DIR_TREE=$(addprefix $(OBJS_ROOT_DIR),$(PROJ_DIR_TREE))
 CFLAGS=-Os -pipe -march=armv5te -mtune=arm926ej-s -fno-caller-saves -Wno-unused-result -mfloat-abi=soft  -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro       -Wl,--warn-common -Wl,--warn-once -Wl,-z,combreloc -Wl,-z,defs    -DUSE_ANDROID_LOG
 CXXFLAGS=-Os -pipe -march=armv5te -mtune=arm926ej-s -fno-caller-saves -Wno-unused-result -mfloat-abi=soft  -Wformat -Werror=format-security -fstack-protector -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro -Wno-virtual-dtor -Wl,-z,defs -DUSE_ANDROID_LOG 
 
-CXXFLAGS+= -fexceptions -fpermissive -Wall -O2 
+CXXFLAGS+= -fexceptions -fpermissive -Wall -O2 -std=c++11
 
 INCLUDE_DIR := -I$(EASYUI_COMMON_INCLUDE) \
 					-I$(ZKSW_PREBUILT_INCLUDE_PATH)/gui \

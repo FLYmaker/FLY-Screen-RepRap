@@ -48,7 +48,7 @@
 <string name="Z Lift">Z Hebung</string>
 <string name="Probe Trigger Wert">Z Trigger Value</string>
 <string name="whtpjc">Bewege den Druckkopf zur Mitte und führe die Probe aus, dann drücke 3 Sekunden auf Z-Trigger-Value und der Wert wird gespeichert</string>
-<string name="storepos?">First move the print head to the designated location, and then long press the corresponding button for 3S, it will automatically save the current coordinate point</string>
+<string name="whtpjc">First move the print head to the designated location, and then long press the corresponding button for 3S, it will automatically save the current coordinate point</string>
     
 <string name="parameter">Einstellungen</string>
 

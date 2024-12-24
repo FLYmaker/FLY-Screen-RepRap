@@ -48,7 +48,7 @@
 <string name="Z Lift">Z Lift</string>
 <string name="Z Trigger value">Z Trigger value</string>
 <string name="storepos">Saved successfully, please release the button</string>
-<string name="storepos?">First move the print head to the designated location, and then long press the corresponding button for 3S, it will automatically save the current coordinate point</string>
+<string name="whtpjc">First move the print head to the designated location, and then long press the corresponding button for 3S, it will automatically save the current coordinate point</string>
 
 <string name="parameter">parameter</string>
 
