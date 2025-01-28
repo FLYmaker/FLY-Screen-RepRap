@@ -22,7 +22,6 @@
 #include "thumbnail.h"
 
 void Hardware_serial_transmission(const std::string& data) ;
-
 int gindex=1; //记录已经储存的gcode反馈界面的命令条数
 vector<string> Command_Feedback; //储存命令反馈界面
 vector<string> File_Gcodes;//储存文件或者宏文件名称及文件夹
@@ -778,30 +777,45 @@ void IPaddress(string strLine){
 	    }
 
 
-	   //解析实时温度
-	   if (Numerical.isMember("heaters")) {
-	      Json::Value obj = Numerical["heaters"];
+	   //解析实时温度 && 解析目标温度
+	   if (Numerical.isMember("temps")){
+	      Json::Value obj_bed_current = Numerical["temps"]["bed"]["current"];
+	      Json::Value obj_bed_active = Numerical["temps"]["bed"]["active"];
+	      Json::Value obj_current = Numerical["temps"]["current"];
+	      Json::Value obj_active = Numerical["temps"]["tools"]["active"];
 	      Current_Temperature.clear();
-	      if (obj.isArray()) {
-	        for (Json::ArrayIndex i = 0; i < obj.size(); ++i) {
-	        	sprintf(buf,"%0.0f",atof(obj[i].asString().c_str()));
-	        	Current_Temperature.push_back(buf); //获得值储存
-	        }
-	      }
-	    }
-	   //解析目标温度
-	   if (Numerical.isMember("active")) {
-	      Json::Value obj = Numerical["active"];
 	      Target_Temperature.clear();
-	      if (obj.isArray()) {
-	        for (Json::ArrayIndex i = 0; i < obj.size(); ++i) {
-	        	sprintf(buf,"%0.0f",atof(obj[i].asString().c_str()));
-	        	Target_Temperature.push_back( buf); //获得值储存
-	        }
-	      }
-	    }
+	      for (Json::ArrayIndex i = 0; i < obj_current.size(); ++i)
+	      {
+			if(i)
+			{
+				sprintf(buf, "%0.0f", atof(obj_current[i-1].asString().c_str()));
+						Current_Temperature.push_back(buf); // Get the value stored
+						sprintf(buf, "%0.0f", atof(obj_active[i-1][0].asString().c_str()));
+						Target_Temperature.push_back(buf); // Get the value stored
+			}
+			else
+			{
+				sprintf(buf, "%0.0f", atof(obj_bed_current.asString().c_str()));
+						Current_Temperature.push_back(buf); // Get the value stored
+						sprintf(buf, "%0.0f", atof(obj_bed_active.asString().c_str()));
+						Target_Temperature.push_back(buf); // Get the value stored
+			}
+		  }
+		}
 
 	   //解析坐标
+	   if (Numerical.isMember("coords") && Numerical["coords"].isMember("xyz")){
+	      Json::Value obj = Numerical["coords"]["xyz"];
+	      Machine_Pos.clear();
+	      if (obj.isArray())
+	      {
+			  for (Json::ArrayIndex i = 0; i < obj.size(); ++i){
+				snprintf(buf,sizeof(buf),"%0.2f",atof(obj[i].asString().c_str()));
+				Machine_Pos.push_back(obj[i].asString().c_str());
+			  }
+		  }
+		}
 	   if (Numerical.isMember("pos")) {
 	      Json::Value obj = Numerical["pos"];
 	      Machine_Pos.clear();
@@ -812,7 +826,6 @@ void IPaddress(string strLine){
 	        	   Machine_Pos.push_back(buf); //获得值储存
 	          }
 	      }
-
 	    }
 
 
@@ -989,7 +1002,7 @@ void IPaddress(string strLine){
 				 can_in--;
 			 }
 
-			 Hardware_serial_transmission("M408 S0\r\n");
+			 Hardware_serial_transmission("M408 S2\r\n");
 
 
 		 //屏幕休眠
@@ -3015,8 +3028,8 @@ static void onListItemClick_ListView5(ZKListView *pListView, int index, int id) 
 static bool onButtonClick_Button9(ZKButton *pButton) {
    // LOGD(" ButtonClick Button9 !!!\n");
 	 currmode = 0;
-	 print_file_path = "M20 S2 P\"0:/gcodes\"";
-	 Hardware_serial_transmission("M20 S2 P\"0:/gcodes\"\r\n");
+	 print_file_path = "M20 S2 P0:/gcodes";
+	 Hardware_serial_transmission("M20 S2 P0:/gcodes\r\n");
 	 mboardsdPtr->setVisible(true);
 	 mfishPtr->setVisible(false);
     return false;
