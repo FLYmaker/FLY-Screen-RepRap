@@ -4,6 +4,44 @@
 #include "gcodeActivity.h"
 
 /*TAG:GlobalVariable全局变量*/
+static ZKTextView* mTextView_printbjPtr;
+static ZKButton* mButton_mode_changePtr;
+static ZKButton* mButton_openAPPtr;
+static ZKTextView* mTextView65Ptr;
+static ZKTextView* mTextView64Ptr;
+static ZKTextView* mTextView63Ptr;
+static ZKEditText* mEditText_APipPtr;
+static ZKEditText* mEditText_APpasswordPtr;
+static ZKEditText* mEditText_APssidPtr;
+static ZKWindow* mwinAPmodePtr;
+static ZKButton* mButton_refreshPtr;
+static ZKButton* mButtonForgetPtr;
+static ZKTextView* mTextConnectStatePtr;
+static ZKTextView* mTextConnectSecTypePtr;
+static ZKTextView* mTextConnectSsidPtr;
+static ZKTextView* mTextview19Ptr;
+static ZKTextView* mTextview17Ptr;
+static ZKTextView* mTextview15Ptr;
+static ZKButton* mButtonDisconnectPtr;
+static ZKWindow* mWindowDisconnectPtr;
+static ZKButton* mButtonautoconnectPtr;
+static ZKButton* mButtonShowPwdPtr;
+static ZKTextView* mTextSecTypePtr;
+static ZKTextView* mTextSsidPtr;
+static ZKTextView* mTextview9Ptr;
+static ZKTextView* mTextview7Ptr;
+static ZKTextView* mTextview5Ptr;
+static ZKEditText* mEdittextPwdPtr;
+static ZKButton* mButtonConnectPtr;
+static ZKWindow* mWindowSetPtr;
+static ZKListView* mListViewWifiInfoPtr;
+static ZKWindow* mHost_computer_wifiPtr;
+static ZKTextView* mTextView_fileNamePtr;
+static ZKTextView* mTextView_print_finishPtr;
+static ZKButton* mPrint_layer_backPtr;
+static ZKButton* mPrint_AgainPtr;
+static ZKWindow* mprint_finishPtr;
+static ZKButton* mRound_ButtonPtr;
 static ZKButton* mY_ValuePtr;
 static ZKButton* mX_ValuePtr;
 static ZKTextView* mTextview52Ptr;
@@ -331,6 +369,17 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
+    ID_GCODE_Button_mode_change, onButtonClick_Button_mode_change,
+    ID_GCODE_Button_openAP, onButtonClick_Button_openAP,
+    ID_GCODE_Button_refresh, onButtonClick_Button_refresh,
+    ID_GCODE_ButtonForget, onButtonClick_ButtonForget,
+    ID_GCODE_ButtonDisconnect, onButtonClick_ButtonDisconnect,
+    ID_GCODE_Buttonautoconnect, onButtonClick_Buttonautoconnect,
+    ID_GCODE_ButtonShowPwd, onButtonClick_ButtonShowPwd,
+    ID_GCODE_ButtonConnect, onButtonClick_ButtonConnect,
+    ID_GCODE_Print_layer_back, onButtonClick_Print_layer_back,
+    ID_GCODE_Print_Again, onButtonClick_Print_Again,
+    ID_GCODE_Round_Button, onButtonClick_Round_Button,
     ID_GCODE_Y_Value, onButtonClick_Y_Value,
     ID_GCODE_X_Value, onButtonClick_X_Value,
     ID_GCODE_Move_XY, onButtonClick_Move_XY,
@@ -526,6 +575,7 @@ typedef struct {
 }S_ListViewFunctionsCallback;
 /*TAG:ListViewFunctionsCallback*/
 static S_ListViewFunctionsCallback SListViewFunctionsCallbackTab[] = {
+    ID_GCODE_ListViewWifiInfo, getListItemCount_ListViewWifiInfo, obtainListItemData_ListViewWifiInfo, onListItemClick_ListViewWifiInfo,
     ID_GCODE_moretime, getListItemCount_moretime, obtainListItemData_moretime, onListItemClick_moretime,
     ID_GCODE_srecc, getListItemCount_srecc, obtainListItemData_srecc, onListItemClick_srecc,
     ID_GCODE_ListView2, getListItemCount_ListView2, obtainListItemData_ListView2, onListItemClick_ListView2,
@@ -556,6 +606,10 @@ typedef struct {
 }S_EditTextInputCallback;
 /*TAG:EditTextInputCallback*/
 static S_EditTextInputCallback SEditTextInputCallbackTab[] = {
+    ID_GCODE_EditText_APip, onEditTextChanged_EditText_APip,
+    ID_GCODE_EditText_APpassword, onEditTextChanged_EditText_APpassword,
+    ID_GCODE_EditText_APssid, onEditTextChanged_EditText_APssid,
+    ID_GCODE_EdittextPwd, onEditTextChanged_EdittextPwd,
     ID_GCODE_Edittext3, onEditTextChanged_Edittext3,
     ID_GCODE_Edittext4, onEditTextChanged_Edittext4,
     ID_GCODE_Edittext2, onEditTextChanged_Edittext2,
@@ -886,6 +940,44 @@ const char* gcodeActivity::getAppName() const{
 //TAG:onCreate
 void gcodeActivity::onCreate() {
 	Activity::onCreate();
+    mTextView_printbjPtr = (ZKTextView*)findControlByID(ID_GCODE_TextView_printbj);
+    mButton_mode_changePtr = (ZKButton*)findControlByID(ID_GCODE_Button_mode_change);
+    mButton_openAPPtr = (ZKButton*)findControlByID(ID_GCODE_Button_openAP);
+    mTextView65Ptr = (ZKTextView*)findControlByID(ID_GCODE_TextView65);
+    mTextView64Ptr = (ZKTextView*)findControlByID(ID_GCODE_TextView64);
+    mTextView63Ptr = (ZKTextView*)findControlByID(ID_GCODE_TextView63);
+    mEditText_APipPtr = (ZKEditText*)findControlByID(ID_GCODE_EditText_APip);if(mEditText_APipPtr!= NULL){mEditText_APipPtr->setTextChangeListener(this);}
+    mEditText_APpasswordPtr = (ZKEditText*)findControlByID(ID_GCODE_EditText_APpassword);if(mEditText_APpasswordPtr!= NULL){mEditText_APpasswordPtr->setTextChangeListener(this);}
+    mEditText_APssidPtr = (ZKEditText*)findControlByID(ID_GCODE_EditText_APssid);if(mEditText_APssidPtr!= NULL){mEditText_APssidPtr->setTextChangeListener(this);}
+    mwinAPmodePtr = (ZKWindow*)findControlByID(ID_GCODE_winAPmode);
+    mButton_refreshPtr = (ZKButton*)findControlByID(ID_GCODE_Button_refresh);
+    mButtonForgetPtr = (ZKButton*)findControlByID(ID_GCODE_ButtonForget);
+    mTextConnectStatePtr = (ZKTextView*)findControlByID(ID_GCODE_TextConnectState);
+    mTextConnectSecTypePtr = (ZKTextView*)findControlByID(ID_GCODE_TextConnectSecType);
+    mTextConnectSsidPtr = (ZKTextView*)findControlByID(ID_GCODE_TextConnectSsid);
+    mTextview19Ptr = (ZKTextView*)findControlByID(ID_GCODE_Textview19);
+    mTextview17Ptr = (ZKTextView*)findControlByID(ID_GCODE_Textview17);
+    mTextview15Ptr = (ZKTextView*)findControlByID(ID_GCODE_Textview15);
+    mButtonDisconnectPtr = (ZKButton*)findControlByID(ID_GCODE_ButtonDisconnect);
+    mWindowDisconnectPtr = (ZKWindow*)findControlByID(ID_GCODE_WindowDisconnect);
+    mButtonautoconnectPtr = (ZKButton*)findControlByID(ID_GCODE_Buttonautoconnect);
+    mButtonShowPwdPtr = (ZKButton*)findControlByID(ID_GCODE_ButtonShowPwd);
+    mTextSecTypePtr = (ZKTextView*)findControlByID(ID_GCODE_TextSecType);
+    mTextSsidPtr = (ZKTextView*)findControlByID(ID_GCODE_TextSsid);
+    mTextview9Ptr = (ZKTextView*)findControlByID(ID_GCODE_Textview9);
+    mTextview7Ptr = (ZKTextView*)findControlByID(ID_GCODE_Textview7);
+    mTextview5Ptr = (ZKTextView*)findControlByID(ID_GCODE_Textview5);
+    mEdittextPwdPtr = (ZKEditText*)findControlByID(ID_GCODE_EdittextPwd);if(mEdittextPwdPtr!= NULL){mEdittextPwdPtr->setTextChangeListener(this);}
+    mButtonConnectPtr = (ZKButton*)findControlByID(ID_GCODE_ButtonConnect);
+    mWindowSetPtr = (ZKWindow*)findControlByID(ID_GCODE_WindowSet);
+    mListViewWifiInfoPtr = (ZKListView*)findControlByID(ID_GCODE_ListViewWifiInfo);if(mListViewWifiInfoPtr!= NULL){mListViewWifiInfoPtr->setListAdapter(this);mListViewWifiInfoPtr->setItemClickListener(this);}
+    mHost_computer_wifiPtr = (ZKWindow*)findControlByID(ID_GCODE_Host_computer_wifi);
+    mTextView_fileNamePtr = (ZKTextView*)findControlByID(ID_GCODE_TextView_fileName);
+    mTextView_print_finishPtr = (ZKTextView*)findControlByID(ID_GCODE_TextView_print_finish);
+    mPrint_layer_backPtr = (ZKButton*)findControlByID(ID_GCODE_Print_layer_back);
+    mPrint_AgainPtr = (ZKButton*)findControlByID(ID_GCODE_Print_Again);
+    mprint_finishPtr = (ZKWindow*)findControlByID(ID_GCODE_print_finish);
+    mRound_ButtonPtr = (ZKButton*)findControlByID(ID_GCODE_Round_Button);
     mY_ValuePtr = (ZKButton*)findControlByID(ID_GCODE_Y_Value);
     mX_ValuePtr = (ZKButton*)findControlByID(ID_GCODE_X_Value);
     mTextview52Ptr = (ZKTextView*)findControlByID(ID_GCODE_Textview52);
