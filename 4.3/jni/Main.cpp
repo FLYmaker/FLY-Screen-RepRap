@@ -6,10 +6,13 @@
 #include "uart/ProtocolSender.h"
 #include <string>
 
+#include "./include/utils/Log.h"
+
 #ifdef __cplusplus
 
 void Hardware_serial_transmission(const std::string& data) {
 	UARTCONTEXT->send((BYTE*)data.c_str(), data.length());
+	LOGD("Hardware_serial_transmission: %s", data.c_str());
 }
 
 extern "C" {
