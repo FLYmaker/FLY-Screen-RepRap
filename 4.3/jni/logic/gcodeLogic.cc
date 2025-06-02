@@ -20,6 +20,7 @@
 #include "json/json.h"
 #include "qoi.h"
 #include "thumbnail.h"
+#include "manager/LanguageManager.h"
 
 void Hardware_serial_transmission(const std::string& data) ;
 
@@ -30,6 +31,44 @@ vector<string> Current_Temperature;//储存实时温度，用于在Display_value
 vector<string> Target_Temperature;//储存目标温度，用于在Display_value线程中将数据刷新显示出来
 vector<string> Machine_Pos;//储存机器坐标，用于在Display_value线程中将数据刷新显示出来
 vector<string> Fan_Percent;//风扇速度，用于在Display_value线程中将数据刷新显示出来
+
+string print_file;
+string macros_file;
+string img_name_set;//图片名称集合
+string status;
+bool getting_img=false;
+bool have_new_img=false;
+bool gcodes_file_num_change=false;
+bool m587_1=false;
+bool m589=false;
+bool m552_s1=false;
+uint32_t m587_1_time=0;
+uint32_t m589_time=0;
+uint32_t m552_s1_time=0;
+uint32_t img_try_getcount=1;
+uint32_t get_img_time=0;
+uint32_t file_size=0;
+uint32_t file_position=0;
+uint32_t gcodes_file_nums=0;
+uint32_t last_gcodes_file_nums=0;
+float z_baby_step=0.0;
+
+
+
+struct WIFI_Info {
+	bool use;
+	std::string bssid;
+    std::string ssid;
+    int signal;
+    std::string security;
+    int freq;
+    std::string ip;
+};
+std::vector<WIFI_Info> WiFi_Info;
+
+
+bool canSend = false;
+
 
 int Motion_Event_X = 0,Motion_Event_Y = 0;
 
@@ -269,12 +308,29 @@ public:
 	 				mTextView16Ptr->setText(Target_Temperature[whT+1]);//喷头活动温度
 	 				mTextView24Ptr->setText(Target_Temperature[whT+1]);//喷头活动温度
 	 				mTextView41Ptr->setText(Target_Temperature[whT+1]);//喷头活动温度
+					if(atof(Target_Temperature[whT+1].c_str())>0){
+						mButton77Ptr->setSelected(true);
+						mTextView7Ptr->setBackgroundPic("temprcxson.png");
+					}
+					else{
+						mButton77Ptr->setSelected(false);
+						mTextView7Ptr->setBackgroundPic("temprcxsoff.png");
+					}
 
 
 
 	 				mTextView51Ptr->setText(Target_Temperature[0]);//热床活动温度
 	 				mTextView130Ptr->setText(Target_Temperature[0]);//热床活动温度
 	 				mTextView20Ptr->setText(Target_Temperature[0]);//热床活动温度
+					if(atof(Target_Temperature[0].c_str())>0){
+						mButton5Ptr->setSelected(true);
+						mTextView49Ptr->setBackgroundPic("temprcxson.png");
+					}
+					else{
+						mButton5Ptr->setSelected(false);
+						mTextView49Ptr->setBackgroundPic("temprcxsoff.png");
+					}
+
 
 		     mTextView5Ptr->setText(Current_Temperature[whT+1]);//喷头实时温度
 		     mTextView17Ptr->setText(Current_Temperature[whT+1]);//喷头实时温度
@@ -284,6 +340,8 @@ public:
 		     mTextView52Ptr->setText(Current_Temperature[0]);//热床实时温度
 		     mTextView15Ptr->setText(Current_Temperature[0]);//热床实时温度
 		     mTextView21Ptr->setText(Current_Temperature[0]);//热床实时温度
+
+
 	 	}
 
 
@@ -296,6 +354,8 @@ public:
 			mTextView36Ptr->setText(Machine_Pos[2].c_str());//Z坐标
 			mTextview37Ptr->setText(Machine_Pos[2].c_str());//Z坐标
 		 }
+
+
 
 
     //检查是否有退出线程的请求，如果有，则返回false，立即退出线程
@@ -342,7 +402,6 @@ bool compare(const FileInfo& inf1, const FileInfo& inf2) {
 	return inf1.datetime > inf2.datetime;
 }
 
-bool canSend = false;
 FILE* f;
 FILE* f2;
 vector<FileInfo> fileInfos;
@@ -416,12 +475,19 @@ string print_file_path = "M20 S2 P0:/gcodes";
 
   void printinit(){
 
-	 Hardware_serial_transmission("M36\r\n");
+	char buf[64]={0};
+	sprintf(buf,"M36 %s\r\n",print_file.c_str());
+	 Hardware_serial_transmission(buf);
+	 Hardware_serial_transmission("M409 K\"job.file.size\"\r\n");
+
 	 atimes = 0,timef = 0,timeh = 0,timet = 0,dytime=0,sytime=0;
      canSend= true;
      mfishPtr->setVisible(false);
      mwinPrintPtr->setVisible(true);
      mboardsdPtr->setVisible(false);
+	 if(LANGUAGEMANAGER->getCurrentCode() == "zh_CN")mTextView11Ptr->setText("预计剩余时间 : 计算中...");
+	 else mTextView11Ptr->setText("Time Left : Calculating...");
+	 mTextView9Ptr->setBackgroundPic("");
      setxs(3);
  }
 
@@ -578,6 +644,13 @@ if(buf[9]>0)
 	 mButton43Ptr->setLongClickListener(&longButtonClickListener);
 	 mButton44Ptr->setLongClickListener(&longButtonClickListener);
 	 mButton45Ptr->setLongClickListener(&longButtonClickListener);
+
+	 mEditText_APssidPtr->setText(StoragePreferences::getString("AP_ssid", "FLY"));
+	 mEditText_APpasswordPtr->setText(StoragePreferences::getString("AP_pwd", "FLY12345678"));
+	 mEditText_APipPtr->setText(StoragePreferences::getString("AP_ip", "192.168.0.1"));
+
+	 system("rm /tmp/*.png");
+	 Hardware_serial_transmission("M20 S2 P0:/gcodes\r\n");
  }
 
  /**
@@ -677,16 +750,73 @@ void jdfile(string strLine){
 }
 //IP地址解析
 void IPaddress(string strLine){
+		// 提取 SSID 和 IP
+		const char* prefix = "access point ";
+		const char* ipPrefix = "IP address ";
+		
+		size_t ssidStart = strLine.find(prefix);
+		if (ssidStart != string::npos) {
+			ssidStart += strlen(prefix);  // 移动到 SSID 起始位置
+			size_t ssidEnd = strLine.find(',', ssidStart);
+			
+			if (ssidEnd != string::npos) {
+				// 提取 SSID
+				string ssid = strLine.substr(ssidStart, ssidEnd - ssidStart);
+				
+				// 提取 IP 地址
+				size_t ipStart = strLine.find(ipPrefix, ssidEnd);
+				size_t ipEnd = strLine.find("\\", ssidEnd);
+				if (ipStart != string::npos) {
+					LOGD("IP address: %s", strLine.substr(ipStart, ipEnd - ipStart).c_str());
+					ipStart += strlen(ipPrefix);  // 移动到 IP 起始位置
+					string ip = strLine.substr(ipStart,ipEnd-ipStart);
+					if(strstr(strLine.c_str(),"is connected")){
+						for(int i=0;i<WiFi_Info.size();i++){
+							if(WiFi_Info[i].ssid == ssid){
+								WiFi_Info[i].ip = ip;
+								std::string password = mEdittextPwdPtr->getText();
+								if(password.length()>0){
+									StoragePreferences::putString(ssid,password);
+								}
 
-		 if(strstr(strLine.c_str(),"IP address")){
-				 string strLinea = strLine;
+								WIFI_Info tmp_wifi_info=WiFi_Info[i];
+								WiFi_Info.erase(WiFi_Info.begin()+i);
+								WiFi_Info.insert(WiFi_Info.begin(),tmp_wifi_info);
+								break;
+							}
+							else{
+								WiFi_Info[i].ip.clear();
+							}
+						}
 
-				char* stra = strstr(strLinea.c_str(),"IP address");
-				stra=stra+11;		// 前置去除空白
-				//string hda = "IP:";
-				char* tokena = strtok(stra, "\\");
-				string hda= tokena;
-				 mTextView55Ptr->setText(hda);}
+						m552_s1 = false;
+						mButton_refreshPtr->setTextTr("Scan");
+						mListViewWifiInfoPtr->refreshListView();
+
+
+					}
+					else if(strstr(strLine.c_str(),"is providing")){
+						m589 = false;
+						WiFi_Info.clear();
+						
+						mListViewWifiInfoPtr->refreshListView();
+
+						mEditText_APssidPtr->setText(ssid);
+						mEditText_APipPtr->setText(ip);
+
+						mEditText_APssidPtr->setInvalid(true);
+						mEditText_APpasswordPtr->setInvalid(true);
+						mEditText_APipPtr->setInvalid(true);
+
+						mButton_openAPPtr->setSelected(true);
+						mButton_openAPPtr->setTextTr("CloseAP");
+
+					}
+				}
+
+
+			}
+		}	
 
 }
 
@@ -698,16 +828,42 @@ void IPaddress(string strLine){
  // 处理没有ok的字符串
  void processPrinterCodeLine(string strLine) {
 
-	LOGD("串口反馈：%s",strLine.c_str());
+	// LOGD("串口反馈：%s",strLine.c_str());
 
 	 //打印结束设置进度条
 	 if(strstr(strLine.c_str(),"Finished printing")){
 		mSeekbar4Ptr->setProgress(100);
 		mTextView53Ptr->setText("100%");
-		 canSend= false;
-			if(finishoff == 1)
-			 Hardware_serial_transmission("M81");
-			 finishoff = 0;
+		canSend= false;
+		if(finishoff == 1){
+			Hardware_serial_transmission("M81");
+			finishoff = 0;
+		}
+		file_size = 0;
+		file_position = 0;
+		mfishPtr->setVisible(false);
+		mwinPrintPtr->setVisible(false);
+		mprint_finishPtr->setVisible(true);
+	 }
+	 else if(strstr(strLine.c_str(),"Cancelled printing")){
+		mwinPrintPtr->setVisible(false);
+		mfishPtr->setVisible(true);
+		canSend=false;
+		can_in = 10;
+		file_size = 0;
+		file_position = 0;
+	 }
+	 else if(strstr(strLine.c_str(),"ok")&&m587_1){
+		m587_1 = false;
+		Hardware_serial_transmission("M587.2 F1\r\n");
+	 }
+	 else if(strstr(strLine.c_str(),"Authentication failed")){
+
+		Hardware_serial_transmission("M552 S0\r\n");
+		mMessage_ReportPtr->setText(strLine);
+		mMessage_ReportPtr->setVisible(true);
+		mMessage_Report_ClosePtr->setVisible(true);
+		Message_Report_Switch = 1;
 	 }
 
 	//Stopped at height 1.548 mm
@@ -744,8 +900,9 @@ void IPaddress(string strLine){
 	 if(strstr(strLine.c_str(),"IP address")){//
 			 IPaddress(strLine);}
 
-	 if(strstr(strLine.c_str(),"status") || strstr(strLine.c_str(),"files") || strstr(strLine.c_str(),"resp") || strstr(strLine.c_str(),"thumbnail")){
- char buf[256];
+	 if(strstr(strLine.c_str(),"status") || strstr(strLine.c_str(),"files") || strstr(strLine.c_str(),"resp") || strstr(strLine.c_str(),"thumbnail")||
+	 strstr(strLine.c_str(),"key")||strstr(strLine.c_str(),"networkScanResults")){
+		char buf[256];
 	 Json::Reader reader;
 	 Json::Value Numerical;
 
@@ -753,7 +910,7 @@ void IPaddress(string strLine){
 	 std::string json_string = strLine;
 	 if (reader.parse(json_string, Numerical, false)) {
 	   //LOGD("解析成功");
-
+		// LOGD("222");
 
 	   //解析sd卡文件
 	   if (Numerical.isMember("files")) {
@@ -766,49 +923,280 @@ void IPaddress(string strLine){
 	        	gcodenum ++;
 	        	//  LOGD("文件：%s",obj[i].asString().c_str());
 	        }
+			if(obj.size()==0){
+				system("rm /tmp/*.png");
+			}
 				//gcodenum=gcodenum+1;
                 mboardsdPtr->refreshListView();
                 mboardsdPtr->setSelection(gcodenum);
+				// mboardsdPtr->setVisible(true);
+
+			// if(Numerical.isMember("dir")){
+			// 	Json::Value dir = Numerical["dir"];
+			// 	if(dir.isString()){
+			// 		if(strstr(dir.asString().c_str(),"gcodes")){
+			// 			last_gcodes_file_nums = gcodes_file_nums;
+			// 			gcodes_file_nums = obj.size();
+			// 			if(gcodes_file_nums != last_gcodes_file_nums){
+			// 				gcodes_file_num_change =true;
+			// 			}
+			// 		}
+			// 	}
+			// }				
+
+
+				
 	      }
 	    }
 
+	
+	if(Numerical.isMember("key")){
+		Json::Value key = Numerical["key"];
 
-	   //解析实时温度
-	   if (Numerical.isMember("heaters")) {
-	      Json::Value obj = Numerical["heaters"];
-	      Current_Temperature.clear();
-	      if (obj.isArray()) {
-	        for (Json::ArrayIndex i = 0; i < obj.size(); ++i) {
-	        	sprintf(buf,"%0.0f",atof(obj[i].asString().c_str()));
-	        	Current_Temperature.push_back(buf); //获得值储存
-	        }
-	      }
-	    }
-	   //解析目标温度
-	   if (Numerical.isMember("active")) {
-	      Json::Value obj = Numerical["active"];
-	      Target_Temperature.clear();
-	      if (obj.isArray()) {
-	        for (Json::ArrayIndex i = 0; i < obj.size(); ++i) {
-	        	sprintf(buf,"%0.0f",atof(obj[i].asString().c_str()));
-	        	Target_Temperature.push_back( buf); //获得值储存
-	        }
-	      }
-	    }
 
-	   //解析坐标
-	   if (Numerical.isMember("pos")) {
-	      Json::Value obj = Numerical["pos"];
-	      Machine_Pos.clear();
+		//M409 K"heat" F"f" 应答解析
+		if( strstr(key.asCString(),"heat")){
+			Json::Value obj = Numerical["result"];
+			if (obj.isObject()) {
+				Json::Value array = obj["heaters"];
+				if (array.isArray()) {
+					Current_Temperature.clear();
+					Target_Temperature.clear();
+					for (Json::ArrayIndex i = 0; i < array.size(); ++i) {
+						Json::Value current = array[i]["current"];
+						if(current.isDouble()){//解析实时温度
+							sprintf(buf,"%0.1f",current.asDouble());
+							Current_Temperature.push_back(buf); //获得值储存
+						}
+						Json::Value active = array[i]["active"];
+						if(active.isInt()){//解析目标温度
+							sprintf(buf,"%d",active.asInt());
+							Target_Temperature.push_back(buf); //获得值储存
 
-	      if (obj.isArray()) {
-	          for (Json::ArrayIndex i = 0; i < obj.size(); ++i) {
-	            	snprintf(buf,sizeof(buf),"%0.2f",atof(obj[i].asString().c_str()));
-	        	   Machine_Pos.push_back(buf); //获得值储存
-	          }
-	      }
+						}
+					}
 
-	    }
+
+				}
+			}
+		}
+
+		//M409 K"move" F"f" 应答解析
+		else if( strstr(key.asCString(),"move")){
+			Json::Value obj = Numerical["result"];
+			if (obj.isObject()) {
+				Json::Value array = obj["axes"];
+				if (array.isArray()) {//解析坐标
+					Machine_Pos.clear();
+					for (Json::ArrayIndex i = 0; i < array.size(); ++i) {
+						Json::Value machinePosition = array[i]["machinePosition"];
+						if(machinePosition.isDouble()){
+							sprintf(buf,"%0.2f",machinePosition.asDouble());
+							Machine_Pos.push_back(buf); //获得值储存
+						}
+
+					}
+
+
+				}
+			}
+		}
+
+		//M409 K\"state\" F\"f\" 应答解析
+		else if( strstr(key.asCString(),"state")){
+			Json::Value obj = Numerical["result"];
+			if (obj.isObject()) {
+				Json::Value status_str = obj["status"];
+				status = status_str.asString();
+
+				if(status == "processing"){
+					if(!mwinPrintPtr->isVisible()){
+						UARTCONTEXT->send((const unsigned char*)"M409 K\"job.file.fileName\"\r\n", strlen("M409 K\"job.file.fileName\"\r\n"));	
+					}
+					else if(mbtnPausePtr->isSelected()){
+						mbtnPausePtr->setSelected(false);
+					}	
+
+				}
+				else if(status == "paused"){
+					if(!mbtnPausePtr->isSelected()){
+						mbtnPausePtr->setSelected(true);
+					}
+				}
+				
+			}
+		}		
+
+		//M409 K"job.file.fileName" 应答解析
+		else if( strstr(key.asCString(),"fileName")){
+			Json::Value fileName = Numerical["result"];
+			if(fileName.isString()){
+				print_file = fileName.asString();
+				printinit();
+			}
+		}
+
+		//M409 K"job.file.size" 应答解析
+		else if( strstr(key.asCString(),"job.file.size")){
+			Json::Value size = Numerical["result"];
+			if(size.isUInt()){
+				file_size = size.asUInt();
+			}
+		}
+
+		//M409 K"job.filePosition" 应答解析
+		else if( strstr(key.asCString(),"filePosition")){
+			Json::Value position = Numerical["result"];
+			if(position.isUInt()){
+				file_position = position.asUInt();
+
+				//解析进度条
+				if(file_size !=0 &&file_position !=0){
+					float progress = (float)file_position*100/file_size;
+					mSeekbar4Ptr->setProgress(progress);
+					char buf[16];
+					sprintf(buf,"%0.2f%%",progress);
+					mTextView53Ptr->setText(buf);
+				}
+			}
+		}
+
+		//M409 K"fans[0].actualValue" 应答解析
+		else if( strstr(key.asCString(),"fans[0].actualValue")){
+			Json::Value fan_value = Numerical["result"];
+			if(fan_value.isDouble()){
+				int fan = fan_value.asDouble()*100;
+				char buf[16];
+				sprintf(buf,"%d%%",fan);
+				mButton82Ptr->setText(buf);
+			}
+		}
+
+		//M409 K"job.timesLeft.file" 应答解析
+		else if( strstr(key.asCString(),"job.timesLeft.file")){
+			uint32_t hours=0;
+			uint32_t minutes=0;
+			uint32_t seconds=0;
+			Json::Value timeLeft_value = Numerical["result"];
+			if(timeLeft_value.isUInt()){
+				uint32_t timeLeft = timeLeft_value.asUInt();
+				hours = timeLeft / 3600;
+				minutes = (timeLeft % 3600) / 60;
+				seconds = timeLeft % 60;
+
+				char buf[16];
+				if(LANGUAGEMANAGER->getCurrentCode() == "zh_CN"){
+					if(hours>0){
+						sprintf(buf,"预计剩余时间 : %2d小时%2d分%2d秒",hours,minutes,seconds);
+					}
+					else if(minutes>0){
+						sprintf(buf,"预计剩余时间 : %2d分%2d秒",minutes,seconds);
+					}
+					else{
+						sprintf(buf,"预计剩余时间 : %2d秒",seconds);
+					}
+					
+				}
+				else{
+					if(hours>0){
+						sprintf(buf,"Time Left : %2dh%2dm%2ds",hours,minutes,seconds);
+					}
+					else if(minutes>0){
+						sprintf(buf,"Time Left : %2dm%2ds",minutes,seconds);
+					}
+					else{
+						sprintf(buf,"Time Left : %2ds",seconds);
+					}
+					mTextView11Ptr->setText(buf);					
+
+				}
+
+
+
+				
+			}
+			
+			
+			
+		}
+
+		//M409 K"job.duration" 应答解析
+		else if( strstr(key.asCString(),"job.duration")){
+			uint32_t days=0;
+			uint32_t hours=0;
+			uint32_t minutes=0;
+			uint32_t seconds=0;
+
+			Json::Value duration_value = Numerical["result"];
+			if(duration_value.isUInt()){
+				uint32_t duration = duration_value.asUInt();
+				days = duration / 86400;
+				hours = (duration % 86400) / 3600;
+				minutes = (duration % 3600) / 60;
+				seconds = duration % 60;
+				char buf[16];
+
+				if(LANGUAGEMANAGER->getCurrentCode() == "zh_CN"){
+					if(days>0){
+						sprintf(buf,"打印时间 : %2d天%2d小时%2d分%2d秒",days,hours,minutes,seconds);
+					}
+					else if(hours>0){
+						sprintf(buf,"打印时间 : %2d小时%2d分%2d秒",hours,minutes,seconds);
+					}
+					else if(minutes>0){
+						sprintf(buf,"打印时间 : %2d分%2d秒",minutes,seconds);
+					}
+					else{
+						sprintf(buf,"打印时间 : %2d秒",seconds);
+					}
+				}
+				else{
+					if(days>0){
+						sprintf(buf,"Print Time : %2dd%2dh%2dm%2ds",days,hours,minutes,seconds);
+					}
+					else if(hours>0){
+						sprintf(buf,"Print Time : %2dh%2dm%2ds",hours,minutes,seconds);
+					}
+					else if(minutes>0){
+						sprintf(buf,"Print Time : %2dm%2ds",minutes,seconds);
+					}
+					else{
+						sprintf(buf,"Print Time : %2ds",seconds);
+					}
+				}
+				
+			}
+			mTextView10Ptr->setText(buf);//显示
+		}
+
+	}
+	else if(Numerical.isMember("networkScanResults")){
+		Json::Value net_array = Numerical["networkScanResults"];
+		if(net_array.isArray()&&net_array.size()>0){
+			m587_1 = false;
+			WiFi_Info.clear();
+			for (Json::ArrayIndex i = 0; i < net_array.size(); ++i) {
+					Json::Value ssid = net_array[i]["ssid"];
+					Json::Value rssi = net_array[i]["rssi"];
+					Json::Value auth = net_array[i]["auth"];
+					Json::Value mac = net_array[i]["mac"];
+
+					WIFI_Info temp_info={0};
+					temp_info.ssid = ssid.asString();
+					temp_info.signal = rssi.asInt();;
+					temp_info.security = auth.asString();
+					temp_info.bssid = mac.asString();
+					WiFi_Info.push_back(temp_info);
+
+			}
+			mListViewWifiInfoPtr->setSelection(0);
+			mListViewWifiInfoPtr->refreshListView();
+			Hardware_serial_transmission("M552\r\n");
+
+		}
+		
+	}
+
 
 
 	   //当前打印文件名字 //Current print file name
@@ -831,7 +1219,7 @@ void IPaddress(string strLine){
 
 
 			   if(sub["next"].asInt() != 0 ){//偏移不为0时，缩略图还没有接收完整，继续发送命令，以获得完整的数据。//When the offset is not 0, the thumbnail has not been received completely, continue to send commands to obtain complete data.
-	               sprintf(buf,"M36.1 P\"%s\" S%d\r\n",Thumbnails_set.fileName.c_str()+2,sub["next"].asInt());
+	               sprintf(buf,"M36.1 P\"%s\" S%d\r\n",Thumbnails_set.fileName.c_str(),sub["next"].asInt());
 	               Hardware_serial_transmission(buf);
 				   QOIUtils::set_qoi_image(mTextView9Ptr, Thumbnails_set.data.c_str());//解析当前的缩略图数据//Parse the current thumbnail data
 
@@ -843,8 +1231,20 @@ void IPaddress(string strLine){
 							Thumbnails_set.fileName.clear();                                    //清理文件名        //clean filename
 
 					   }else if(Thumbnails_set.format == "png"){
-						   make_thumbnail(Thumbnails_set.data);
-						   mTextView9Ptr->setBackgroundPic("/tmp/Print_Thumbnails.png");
+						   if(strstr(Thumbnails_set.fileName.c_str(),"0:/gcodes")){
+							make_thumbnail(Thumbnails_set.data);
+							mTextView9Ptr->setBackgroundPic("/tmp/Print_Thumbnails.png");
+						   }
+						   else{
+							make_thumbnail(Thumbnails_set.data,Thumbnails_set.fileName);
+							img_name_set+=Thumbnails_set.fileName;
+						   } 
+						   
+							Thumbnails_set.data.clear();                                        //清理缩略图数据//Clean up thumbnail data
+							Thumbnails_set.fileName.clear();                                    //清理文件名        //clean filename
+							getting_img=false;
+							have_new_img=true;
+
 					   }
 			       }
 
@@ -865,6 +1265,7 @@ void IPaddress(string strLine){
 
 	      Json::Value obj = Numerical["thumbnails"];
 	      if (obj.isArray()) {
+				Thumbnails_set.data.clear();
 	          for (Json::ArrayIndex i = 0; i < obj.size(); ++i)
 	          {
 	        	  Json::Value& root = obj[i];
@@ -884,6 +1285,9 @@ void IPaddress(string strLine){
 		        		  Thumbnails_set.offset = root["offset"].asInt();
 		        	  }
 	            }
+				if(!strstr(Thumbnails_set.fileName.c_str(),"0:/gcodes")){
+					Thumbnails_set.offset=obj[0]["offset"].asInt();
+				}
 
 //			  LayoutPosition Thumbnails_get_pos = mTextView9Ptr->getPosition();               //获取要设置预览控件的坐标 //Get the coordinates of the preview control to set
 //			  int middle_point_x = Thumbnails_get_pos.mLeft  +  Thumbnails_get_pos.mWidth/2;  //计算要设置预览控件的中心点X坐标 //Calculate the X coordinate of the center point of the preview control to be set
@@ -897,7 +1301,9 @@ void IPaddress(string strLine){
 //			   mTextView9Ptr->setPosition(Thumbnails_set_pos);//设置预览图位置以及大小 //Set the preview position and size
 			   //合成M36.1命令以获取预览图数据
 			   //Synthesize M36.1 commands to get preview image data
-	          sprintf(buf,"M36.1 P\"%s\" S%d\r\n",Thumbnails_set.fileName.c_str()+2,Thumbnails_set.offset);
+			   getting_img=true;
+			   get_img_time=0;
+	          sprintf(buf,"M36.1 P\"%s\" S%d\r\n",Thumbnails_set.fileName.c_str(),Thumbnails_set.offset);
 	          Hardware_serial_transmission(buf);//发送M36.1命令以获取预览图数据 //Send M36.1 command to get preview image data
 
 	      }
@@ -926,6 +1332,7 @@ void IPaddress(string strLine){
           // LOGD("坐标：%s",Numerical["resp"].asString().c_str());
            if( strlen (Numerical["resp"].asString().c_str()) > 1 )
           {
+			// LOGD("***串口反馈***：%s",strLine.c_str());
 	         Command_Feedback.push_back(Numerical["resp"].asString().c_str()) ; //获得值储存
 	         // gindex++;//计算总共记录了多少条反馈的命令，200条清理一次。
 			 //
@@ -933,6 +1340,12 @@ void IPaddress(string strLine){
 		     mListView2Ptr->setSelection(Command_Feedback.size()-2);
 	          if(strstr(Numerical["resp"].asString().c_str(),"Speed factor")){
 			     mButton83Ptr->setText(strstr(Numerical["resp"].asString().c_str(),"Speed factor")+13);
+			   }
+			   if(strstr(Numerical["resp"].asString().c_str(),"Baby stepping offsets")){
+					char *Z_ptr=strstr(Numerical["resp"].asString().c_str(),"Z:");
+					z_baby_step=atof(Z_ptr+2);
+					sprintf(buf,"%0.2fmm",z_baby_step);
+					mTextView57Ptr->setText(buf);
 			   }
           }
 
@@ -979,13 +1392,70 @@ void IPaddress(string strLine){
 	 //定时器0
 	 if(id == 0){
 
+		if(m587_1){
+			m587_1_time++;
+			if(m587_1_time>=5){
+				m587_1 = false;
+				mButton_refreshPtr->setTextTr("Scan");
+				Hardware_serial_transmission("M587.2 F1\r\n");
+			}
+		}
+
+		if(m552_s1){
+			m552_s1_time++;
+			if(m552_s1_time>=5){
+				m552_s1 = false;
+				mButton_refreshPtr->setTextTr("Scan");
+			}
+		}
+		
+
+		if(m589){
+			m589_time++;
+			if(m589_time==2){
+				Hardware_serial_transmission("M552 S2\r\n");
+			}
+			else if(m589_time>=3){
+				m589 = false;
+				mButton_openAPPtr->setTextTr("OpenAP");
+			}
+		}
+
+		if(getting_img){
+			get_img_time++;
+			if(get_img_time>=10){
+				Thumbnails_set.fileName.clear();                                    //清理文件名        //clean filename
+				Thumbnails_set.data.clear();                                        //清理缩略图数据//Clean up thumbnail data
+				Thumbnails_set.format.clear();
+				get_img_time=0;
+				getting_img=false;
+			}
+		}
+
 
 			 if(can_in > 1){
 				 can_in--;
 			 }
 
-			 Hardware_serial_transmission("M408 S0\r\n");
+			//  Hardware_serial_transmission("M408 S0\r\n");
+			if(mhomePtr->isVisible()||mtempPtr->isVisible()||mWHPtr->isVisible()||mwinPrintPtr->isVisible()){
+				UARTCONTEXT->send((const unsigned char*)"M409 K\"heat\" F\"f\"\r\n", strlen("M409 K\"heat\" F\"f\"\r\n"));
+				UARTCONTEXT->send((const unsigned char*)"M409 K\"move\" F\"f\"\r\n", strlen("M409 K\"move\" F\"f\"\r\n"));
+				
+			}
+			UARTCONTEXT->send((const unsigned char*)"M409 K\"state\" F\"f\"\r\n", strlen("M409 K\"state\" F\"f\"\r\n"));
 
+
+			if(mwinPrintPtr->isVisible()){
+				UARTCONTEXT->send((const unsigned char*)"M409 K\"job.filePosition\"\r\n", strlen("M409 K\"job.filePosition\"\r\n"));
+				UARTCONTEXT->send((const unsigned char*)"M409 K\"job.timesLeft.file\"\r\n", strlen("M409 K\"job.timesLeft.file\"\r\n"));
+			}
+			if(mprintcsPtr->isVisible()){
+				UARTCONTEXT->send((const unsigned char*)"M290\r\n", strlen("M290\r\n"));
+				UARTCONTEXT->send((const unsigned char*)"M220\r\n", strlen("M220\r\n"));
+				UARTCONTEXT->send((const unsigned char*)"M409 K\"fans[0].actualValue\"\r\n", strlen("M409 K\"fans[0].actualValue\"\r\n"));
+				
+			}
 
 		 //屏幕休眠
 	 	  if(StoragePreferences::getBool("pmcs", false)&&(BRIGHTNESSHELPER->isScreenOn())){
@@ -1000,42 +1470,126 @@ void IPaddress(string strLine){
 
 	 	  //打印计时
 		  if(canSend) {
-
-			  dytime++;
-		   		atimes++;
-		    		if (atimes > 59) {
-		    			atimes = 0;
-		    			timef++;
-		    		}
-		    		if (timef >= 59) {
-		    			timef = 0;
-		    			timeh++;
-		    		}
-		    		if (timeh > 23) {
-		    			timeh = 0;
-		    			timet++;
-		    		}
-		    	   	char bufdytime[30];
-		    	   	if(timeh>0){
-		    		    	 if(timet>0)
-		    		    	   sprintf(bufdytime,"Print Time:%dd%dh%dm%ds",timet,timeh,timef,atimes);
-		    		    	 else
-		    		    	    sprintf(bufdytime,"Print Time：:%dh%dm%ds",timeh,timef,atimes);
-		    		 }else
-		    		   sprintf(bufdytime,"Print Time:%dm%ds",timef,atimes);
-		    		mTextView10Ptr->setText(bufdytime);//显示
-		    		} //打印计时
-
-
+			UARTCONTEXT->send((const unsigned char*)"M409 K\"job.duration\"\r\n", strlen("M409 K\"job.duration\"\r\n"));
+			//   dytime++;
+		   	// 	atimes++;
+		    // 		if (atimes > 59) {
+		    // 			atimes = 0;
+		    // 			timef++;
+		    // 		}
+		    // 		if (timef >= 59) {
+		    // 			timef = 0;
+		    // 			timeh++;
+		    // 		}
+		    // 		if (timeh > 23) {
+		    // 			timeh = 0;
+		    // 			timet++;
+		    // 		}
+		    // 	   	char bufdytime[30];
+		    // 	   	if(timeh>0){
+		    // 		    	 if(timet>0)
+		    // 		    	   sprintf(bufdytime,"Print Time:%dd%dh%dm%ds",timet,timeh,timef,atimes);
+		    // 		    	 else
+		    // 		    	    sprintf(bufdytime,"Print Time：:%dh%dm%ds",timeh,timef,atimes);
+		    // 		 }else
+		    // 		   sprintf(bufdytime,"Print Time:%dm%ds",timef,atimes);
+		    // 		mTextView10Ptr->setText(bufdytime);//显示
+		    } //打印计时
 
 
+		 if(mboardsdPtr->isVisible()&&img_try_getcount&&!getting_img){//获取预览图片 gcodes_file_num_change&&
+			static int cur_file=0;
+
+			// LOGD("cur_file:%d",cur_file);
+			if(cur_file<File_Gcodes.size()){
+				if(strstr(File_Gcodes[cur_file].c_str(),".gcode")&&!strstr(img_name_set.c_str(),File_Gcodes[cur_file].c_str())){
+					
+					// LOGD("File_Gcodes[%d]:%s",cur_file,File_Gcodes[cur_file].c_str());
+
+
+					getting_img = true;
+					get_img_time = 0;
+
+					char buf[64]={0};
+					sprintf(buf,"M36 %s\r\n",File_Gcodes[cur_file].c_str());
+					Hardware_serial_transmission(buf);
+
+					
+
+				}
+
+				if(have_new_img){
+					have_new_img=false;
+					mboardsdPtr->refreshListView();
+				}
+				
+			}
+
+			cur_file++;
+			if(cur_file>=File_Gcodes.size()) {
+				cur_file=0;
+				gcodes_file_num_change = false;
+				img_try_getcount--;
+			}
+		 }
+
+
+
+	 }
+	 if(id==1){
+		static char ponit_num=0;
+		if(LANGUAGEMANAGER->getCurrentCode() == "zh_CN"){
+			if(m587_1){
+				std:string refresh_str="扫描中";
+				refresh_str.append(ponit_num,'.');
+				ponit_num=(ponit_num+1)%4;
+				mButton_refreshPtr->setText(refresh_str);
+
+			}
+			else if(m552_s1){
+				std::string refresh_str="正在连接";
+				refresh_str.append(ponit_num,'.');
+				ponit_num=(ponit_num+1)%4;
+				mButton_refreshPtr->setText(refresh_str);
+
+			}
+			else if(m589){
+				std::string open_str="正在打开";
+				open_str.append(ponit_num,'.');
+				ponit_num=(ponit_num+1)%4;
+				mButton_openAPPtr->setText(open_str);
+			}
+		}
+		else{
+			if(m587_1){
+				std::string refresh_str="Scanning";
+				refresh_str.append(ponit_num,'.');
+				ponit_num=(ponit_num+1)%4;
+				mButton_refreshPtr->setText(refresh_str);
+
+			}
+			else if(m552_s1){
+				std::string refresh_str="connecting";
+				refresh_str.append(ponit_num,'.');
+				ponit_num=(ponit_num+1)%4;
+				mButton_refreshPtr->setText(refresh_str);
+
+			}
+			else if(m589){
+				std::string open_str="opening";
+				open_str.append(ponit_num,'.');
+				ponit_num=(ponit_num+1)%4;
+				mButton_openAPPtr->setText(open_str);
+			}
+
+
+		}
 	 }
 
  if(id == 3 && Message_Report_Switch == 1){
 	 Message_Report_Switch = 0;
 	 mMessage_ReportPtr->setVisible(false);
-
-
+	 mMessage_Report_ClosePtr->setVisible(false);
  }
 
 	 if(id==2){
@@ -1198,7 +1752,7 @@ if(xztime<0){//卸载按钮动画展示
      //LOGD(" ButtonClick btnPrintOK !!!\n");
 	 if(currmode == 0){
 		 char buf[128];
-	     printinit();//打印初始化
+//	     printinit();//打印初始化
 	     if( strlen(print_file_path.c_str()) > 17 )
 	        snprintf(buf,sizeof(buf),"M32 %s/%s\r\n",print_file_path.c_str()+18,File_Gcodes[xzgcodenum].c_str());
 	     else
@@ -1208,11 +1762,18 @@ if(xztime<0){//卸载按钮动画展示
 	     Hardware_serial_transmission(buf);
 
 
-	 mwinPrintPtr->setVisible(true);
+//	 mwinPrintPtr->setVisible(true);
 	 mboardsdPtr->setVisible(false);
-	 mwinQueryPrintPtr->hideWnd();
+	 mwinQueryPrintPtr->setVisible(false);
 
 	 canSend=true;
+	 }
+	 else if(currmode == 1){
+		Hardware_serial_transmission(macros_print_patha);
+		Hardware_serial_transmission("/");
+		Hardware_serial_transmission(File_Gcodes[xzgcodenum].c_str());
+		Hardware_serial_transmission("\"\r\n");
+		mwinQueryPrintPtr->setVisible(false);
 	 }
 
 
@@ -1554,17 +2115,17 @@ if(xztime<0){//卸载按钮动画展示
 
 
 	 	else{
-	 		Hardware_serial_transmission("100");
+	 		Hardware_serial_transmission("10");
 	 	    Hardware_serial_transmission(" F");
 	 		   if(strcmp(csf.c_str(),"")!=0){
 	 	 	             Hardware_serial_transmission(csf);
 	 	 	            Hardware_serial_transmission("\r\n");
-	 	 		 	     xztime=-100*60*20/atoi(csf.c_str());
+	 	 		 	     xztime=-10*60*20/atoi(csf.c_str());
 	 	 	         }
 	 	    	   else{
 	 	    		      sprintf(buf,"%d\r\n",hcsd);
 	 	    		      Hardware_serial_transmission(buf);
-	 	    		      xztime=-100*60*20/hcsd;
+	 	    		      xztime=-10*60*20/hcsd;
 
 	 	    	   }
 	 	}
@@ -1624,7 +2185,7 @@ if(xztime<0){//卸载按钮动画展示
 
 
  	else{
- 		Hardware_serial_transmission("100");
+ 		Hardware_serial_transmission("10");
  	    Hardware_serial_transmission(" F");
  	 	 if(jcsd == 0){//默认按钮常速
 
@@ -1637,12 +2198,12 @@ if(xztime<0){//卸载按钮动画展示
  	     	 else{
  	     		      sprintf(buf,"%d\r\n",hcsd);
  	     		      Hardware_serial_transmission(buf);
- 	     		      xztime=100*60*20/hcsd;
+ 	     		      xztime=10*60*20/hcsd;
  	     		             }  }
  	    else{
  	 		  sprintf(buf,"%d\r\n",hcsd);
  	 		    Hardware_serial_transmission(buf);
- 	 		    xztime=100*60*20/hcsd;
+ 	 		    xztime=10*60*20/hcsd;
 
 
 
@@ -1764,12 +2325,34 @@ void  setxs(int a){
 
 
 static bool onButtonClick_Button70(ZKButton *pButton) {
+	if(mwinPrintPtr->isVisible()){
+
+		 Message_Report_Switch=1;
+		 mMessage_ReportPtr->setTextColor(0xFF0000);
+		 mMessage_ReportPtr->setText("打印中请勿点击其它界面");
+		 mMessage_ReportPtr->setVisible(true);
+		 mMessage_Report_ClosePtr->setVisible(true);
+		 return false;
+	}
+
+
 	 setxs(1);
 
     return false;
 }
 
 static bool onButtonClick_Button71(ZKButton *pButton) {
+	if(mwinPrintPtr->isVisible()){
+
+		 Message_Report_Switch=1;
+		 mMessage_ReportPtr->setTextColor(0xFF0000);
+		 mMessage_ReportPtr->setText("打印中请勿点击其它界面");
+		 mMessage_ReportPtr->setVisible(true);
+		 mMessage_Report_ClosePtr->setVisible(true);
+		 return false;
+	}
+
+
 	 setxs(2);
 	 mButton3Ptr->setText(tempptwd);
 
@@ -1804,6 +2387,17 @@ static bool onButtonClick_Button72(ZKButton *pButton) {
 }
 
 static bool onButtonClick_Button73(ZKButton *pButton) {
+	if(mwinPrintPtr->isVisible()){
+
+		 Message_Report_Switch=1;
+		 mMessage_ReportPtr->setTextColor(0xFF0000);
+		 mMessage_ReportPtr->setText("打印中请勿点击其它界面");
+		 mMessage_ReportPtr->setVisible(true);
+		 mMessage_Report_ClosePtr->setVisible(true);
+		 return false;
+	}
+
+
 
 	setxs(4);
 
@@ -1867,7 +2461,7 @@ static bool onButtonClick_Button77(ZKButton *pButton) {
 
 
 
-               	pButton->setSelected(!pButton->isSelected());
+//               	pButton->setSelected(!pButton->isSelected());
 
 
     return false;
@@ -1997,59 +2591,100 @@ static bool onButtonClick_Button94(ZKButton *pButton) {
 static bool onButtonClick_Button95(ZKButton *pButton) {
     //LOGD(" ButtonClick Button95 !!!\n");
  	mAJPtr->hideWnd();
+	char buf[24]={0};
 
-	switch(curprintcs){
-
-	case 0:Hardware_serial_transmission("M140 S");
-	Hardware_serial_transmission(sContentStr);break;
-
-	case 1:Hardware_serial_transmission("M104 S");
-	Hardware_serial_transmission(sContentStr);break;
-
-	case 2:Hardware_serial_transmission("M106 S");
-	Hardware_serial_transmission(sContentStr);break;
-
-	case 3://backok++;
-	Hardware_serial_transmission("M220 S");
-	Hardware_serial_transmission(sContentStr);break;
-
-	case 4: StoragePreferences::putString("Leveling_high", sContentStr);
-		     char buf[10];
-		     snprintf(buf,sizeof(buf),"%smm",sContentStr.c_str());
-	         mButton46Ptr->setText(buf)	;break;
-
-	case 20: StoragePreferences::putInt("SJtime", atoi(sContentStr.c_str()));   mButton30Ptr->setText(sContentStr.c_str());      break;
-
-
-
-	case 30: Hardware_serial_transmission("M104 S"); tempptwd = atoi(sContentStr.c_str());
-	         mButton3Ptr->setText(tempptwd);
-	         Hardware_serial_transmission(sContentStr.c_str());break;
-	case 31: Hardware_serial_transmission("M140 S"); temprcwd = atoi(sContentStr.c_str());
-		         mButton3Ptr->setText(temprcwd);
-		         Hardware_serial_transmission(sContentStr.c_str());break;
-
-	case 50:      StoragePreferences::putInt("X_axis_maximum", atoi(sContentStr.c_str()));
-		          mX_ValuePtr->setText(atoi(sContentStr.c_str()));
-		      	  X_Axis_maximum = atoi(sContentStr.c_str());
-		      	  mX_axis_maximumPtr->setProgress(X_Axis_maximum);
-
-		          break;
-	case 51:      StoragePreferences::putInt("Y_axis_maximum", atoi(sContentStr.c_str()));
-		          mY_ValuePtr->setText(atoi(sContentStr.c_str()));
-		      	  Y_Axis_maximum = atoi(sContentStr.c_str());
-		          mY_axis_maximumPtr->setProgress(Y_Axis_maximum);
-
-		          break;
-
+	switch (curprintcs)
+	{
+	case 0:
+	{
+		Hardware_serial_transmission("M140 S");
+		Hardware_serial_transmission(sContentStr);
+		break;
 	}
-	//backok++;
+	case 1:
+	{
+		Hardware_serial_transmission("M104 S");
+		Hardware_serial_transmission(sContentStr);
+		break;
+	}
+
+	case 2:
+	{
+		int fanpercent = atoi(sContentStr.c_str());
+		if (fanpercent > 100)
+			fanpercent = 100;
+		int fan_speed = fanpercent * 255 / 100;
+		sprintf(buf, "M106 S%d", fan_speed);
+		Hardware_serial_transmission(buf);
+		break;
+	}
+	case 3:
+	{
+		 // backok++;
+		int speed_percent = atoi(sContentStr.c_str());
+		sprintf(buf, "M220 S%d", speed_percent);
+
+		Hardware_serial_transmission(buf);
+		break;
+	}
+
+	case 4:
+	{
+		StoragePreferences::putString("Leveling_high", sContentStr);
+		snprintf(buf, sizeof(buf), "%smm", sContentStr.c_str());
+		mButton46Ptr->setText(buf);
+		break;
+	}
+
+	case 20:
+	{
+		StoragePreferences::putInt("SJtime", atoi(sContentStr.c_str()));
+		mButton30Ptr->setText(sContentStr.c_str());
+		break;
+	}
+
+	case 30:
+	{
+		Hardware_serial_transmission("M104 S");
+		tempptwd = atoi(sContentStr.c_str());
+		mButton3Ptr->setText(tempptwd);
+		Hardware_serial_transmission(sContentStr.c_str());
+		break;
+	}
+	case 31:
+	{
+		Hardware_serial_transmission("M140 S");
+		temprcwd = atoi(sContentStr.c_str());
+		mButton3Ptr->setText(temprcwd);
+		Hardware_serial_transmission(sContentStr.c_str());
+		break;
+	}
+
+	case 50:
+	{
+		StoragePreferences::putInt("X_axis_maximum", atoi(sContentStr.c_str()));
+		mX_ValuePtr->setText(atoi(sContentStr.c_str()));
+		X_Axis_maximum = atoi(sContentStr.c_str());
+		mX_axis_maximumPtr->setProgress(X_Axis_maximum);
+		break;
+	}
+	case 51:
+	{
+		StoragePreferences::putInt("Y_axis_maximum", atoi(sContentStr.c_str()));
+		mY_ValuePtr->setText(atoi(sContentStr.c_str()));
+		Y_Axis_maximum = atoi(sContentStr.c_str());
+		mY_axis_maximumPtr->setProgress(Y_Axis_maximum);
+		break;
+	}
+	}
+	// backok++;
 	Hardware_serial_transmission("\r\n");
-	//LOGD("sContentStr:%s",sContentStr.c_str());
- 	sContentStr.clear();
+	// LOGD("sContentStr:%s",sContentStr.c_str());
+	sContentStr.clear();
 	mTextView22Ptr->setText(sContentStr);
-    return false;
+	return false;
 }
+
 static bool onButtonClick_Button96(ZKButton *pButton) {
   //  LOGD(" ButtonClick Button96 !!!\n");
 	delOneChar();
@@ -2152,7 +2787,7 @@ static bool onButtonClick_Button100(ZKButton *pButton) {
 		if(strcmp(hccdf.c_str(),"")!=0)
 			sprintf(buf,"Extrusion length：%s",hccdf.c_str());
 				else
-			sprintf(buf,"Extrusion length：100");
+			sprintf(buf,"Extrusion length：10");
 			mButton115Ptr->setText(buf);
 
 			if(strcmp(dsf.c_str(),"")!=0)
@@ -2511,6 +3146,7 @@ case 18:sprintf(buf,"HIGH speed：%s",gsf.c_str());mButton118Ptr->setText(buf); 
 
  	sContentStr.clear();
 	mTextView46Ptr->setText("");
+	mAJ1Ptr->setVisible(false);
 
 	return false;
 }
@@ -2540,7 +3176,7 @@ static bool onButtonClick_Button128(ZKButton *pButton) {
 	mButton114Ptr->setText(buf);
 
 
-
+	onButtonClick_Button100(mButton100Ptr);
 
 
     return false;
@@ -2896,12 +3532,12 @@ static bool onButtonClick_Button5(ZKButton *pButton) {
 	        Hardware_serial_transmission("M140 S");
 	        sprintf(buf,"%d\r\n",temprcwd);
 	    Hardware_serial_transmission(buf);
-	    mTextView49Ptr->setBackgroundPic("temprcxson.png");
+//	    mTextView49Ptr->setBackgroundPic("temprcxson.png");
 	   }
 	        else{
-	        mTextView49Ptr->setBackgroundPic("temprcxsoff.png");
+//	        mTextView49Ptr->setBackgroundPic("temprcxsoff.png");
 	        Hardware_serial_transmission("M140 S0\r\n");}
-             pButton->setSelected(!pButton->isSelected());
+//             pButton->setSelected(!pButton->isSelected());
 
 
     return false;
@@ -3010,10 +3646,11 @@ static void onListItemClick_ListView5(ZKListView *pListView, int index, int id) 
 static bool onButtonClick_Button9(ZKButton *pButton) {
    // LOGD(" ButtonClick Button9 !!!\n");
 	 currmode = 0;
-	 print_file_path = "M20 S2 P\"0:/gcodes\"";
-	 Hardware_serial_transmission("M20 S2 P\"0:/gcodes\"\r\n");
-	 mboardsdPtr->setVisible(true);
+	 print_file_path = "M20 S2 P0:/gcodes";
+	 Hardware_serial_transmission("M20 S2 P0:/gcodes\r\n");
 	 mfishPtr->setVisible(false);
+	 mboardsdPtr->setVisible(true);
+	 img_try_getcount=1;
     return false;
 }
 
@@ -3025,7 +3662,7 @@ static bool onButtonClick_Button10(ZKButton *pButton) {
 	sprintf(macros_print_patha,"M98 P\"0:/macros/");
 	sprintf(macros_print_path,"M98 P\"0:/macros/");
 	currmode = 1;
-	Hardware_serial_transmission("M20 S2 P\"0:/macros\"\r\n");
+	 Hardware_serial_transmission("M20 S2 P0:/macros\r\n");
 	// snprintf(macros_print_path, sizeof(macros_print_path), "M98 P\"0:/macros/");
 
 	 mboardsdPtr->setVisible(true);
@@ -3045,24 +3682,29 @@ static int getListItemCount_boardsd(const ZKListView *pListView) {
 }
 
 static void obtainListItemData_boardsd(ZKListView *pListView,ZKListView::ZKListItem *pListItem, int index) {
-    //LOGD(" obtainListItemData_ boardsd  !!!\n");
+	// LOGD(" obtainListItemData_ boardsd  !!!\n");
 	pListItem->setText(File_Gcodes[index]);
 
-    char buf[20];
-     sprintf(buf,"%s", File_Gcodes[index].c_str());
-		if(buf[0] != '*'){
-  	char path[50] = {0};
-  snprintf(path, sizeof(path), "fileicon1.png");
-	ZKListView::ZKListSubItem* icon = pListItem->findSubItemByID(ID_GCODE_file_icon);
-         icon->setBackgroundPic(path);
+	char buf[64];
+	sprintf(buf, "%s", File_Gcodes[index].c_str());
+	if (buf[0] != '*')
+	{
+		char path[64] = {0};
+		sprintf(path,"/tmp/%s.png",buf);
+		if(access(path, F_OK) == -1){
+			snprintf(path, sizeof(path), "fileicon1.png");
 		}
-		else{
-		  	char path[50] = {0};
-		  snprintf(path, sizeof(path), "fileicon.png");
-			ZKListView::ZKListSubItem* icon = pListItem->findSubItemByID(ID_GCODE_file_icon);
-		         icon->setBackgroundPic(path);
-				}
 
+		ZKListView::ZKListSubItem *icon = pListItem->findSubItemByID(ID_GCODE_file_icon);
+		icon->setBackgroundPic(path);
+	}
+	else
+	{
+		char path[128] = {0};
+		snprintf(path, sizeof(path), "fileicon.png");
+		ZKListView::ZKListSubItem *icon = pListItem->findSubItemByID(ID_GCODE_file_icon);
+		icon->setBackgroundPic(path);
+	}
 }
 
 static void onListItemClick_boardsd(ZKListView *pListView, int index, int id) {
@@ -3077,6 +3719,10 @@ static void onListItemClick_boardsd(ZKListView *pListView, int index, int id) {
 		//LOGD("%c",buf[0]);
 		if(buf[0] != '*'){//非文件夹
 
+			print_file=File_Gcodes[xzgcodenum];
+			mdfPtr->setTextTr("Are you sure you need to print?");
+			mTextView_fileNamePtr->setText(print_file);
+			mbtnPrintOKPtr->setTextTr("Print");
 			mwinQueryPrintPtr->setVisible(true);
 
 		}
@@ -3106,11 +3752,18 @@ static void onListItemClick_boardsd(ZKListView *pListView, int index, int id) {
 
 		//LOGD("%c",buf[0]);
 		if(buf[0] != '*'){
+
+		macros_file=File_Gcodes[xzgcodenum];
+		mdfPtr->setTextTr("Confirm the execution of the macro file?");
+		mTextView_fileNamePtr->setText(macros_file);
+		mbtnPrintOKPtr->setTextTr("Confirm");
+		mwinQueryPrintPtr->setVisible(true);
+			
          //LOGD("路径2：%s",macros_print_patha);
-		 Hardware_serial_transmission(macros_print_patha);
-		 Hardware_serial_transmission("/");
-		 Hardware_serial_transmission(File_Gcodes[xzgcodenum].c_str());
-		 Hardware_serial_transmission("\"\r\n");
+		//  Hardware_serial_transmission(macros_print_patha);
+		//  Hardware_serial_transmission("/");
+		//  Hardware_serial_transmission(File_Gcodes[xzgcodenum].c_str());
+		//  Hardware_serial_transmission("\"\r\n");
 
 		}
 
@@ -3190,7 +3843,8 @@ static bool onButtonClick_Button59(ZKButton *pButton) {
 
 		}
 		 else{
-		 		Hardware_serial_transmission("M302 S170\r\n");
+			Hardware_serial_transmission("M302 P0\r\n");
+			Hardware_serial_transmission("M302 S170\r\n");
 
 		 	}
 
@@ -3380,12 +4034,7 @@ static bool onButtonClick_Button34(ZKButton *pButton) {
    // LOGD(" ButtonClick Button34 !!!\n");
 	int progress = mSeekBar7Ptr->getProgress();
 	mSeekBar7Ptr->setProgress(progress-1);
-
-	//char buf[10];
-			//	sprintf(buf,"%0.2f",0.01);
-			Hardware_serial_transmission("G91\r\n");
-			Hardware_serial_transmission("G1 Z-0.01\r\n");
-			Hardware_serial_transmission("G90 \r\n");
+	Hardware_serial_transmission("M290 S-0.01 R1\r\n");
     return false;
 }
 
@@ -3397,11 +4046,8 @@ static bool onButtonClick_Button35(ZKButton *pButton) {
    // LOGD(" ButtonClick Button35 !!!\n");
 	int progress = mSeekBar7Ptr->getProgress();
 	mSeekBar7Ptr->setProgress(progress+1);
-	//	char buf[10];
-	//				sprintf(buf,"%0.2f",0.01);
-					Hardware_serial_transmission("G91\r\n");
-				Hardware_serial_transmission("G1 Z0.01\r\n");
-				Hardware_serial_transmission("G90 \r\n");
+	Hardware_serial_transmission("M290 S0.01 R1\r\n");
+
     return false;
 }
 
@@ -3624,6 +4270,11 @@ static bool onButtonClick_Button50(ZKButton *pButton) {
 }
 static bool onButtonClick_Message_Report_Close(ZKButton *pButton) {
   //  LOGD(" ButtonClick Message_Report_Close !!!\n");
+
+	 mMessage_ReportPtr->setVisible(false);
+	 mMessage_Report_ClosePtr->setVisible(false);
+
+
     return false;
 }
 static bool onButtonClick_Move_XY(ZKButton *pButton) {
@@ -3703,6 +4354,300 @@ static bool onButtonClick_Round_Button(ZKButton *pButton) {
 		StoragePreferences::putString("whmove_background", "NULL");
 	}
 
+
+    return false;
+}
+static bool onButtonClick_Print_Again(ZKButton *pButton) {
+//    LOGD(" ButtonClick Print_Again !!!\n");
+	mprint_finishPtr->setVisible(false);
+	printinit();
+	char buf[128];
+	sprintf(buf,"M32 %s\r\n",print_file.c_str());
+	Hardware_serial_transmission(buf);
+	return false;
+}
+
+static bool onButtonClick_Print_layer_back(ZKButton *pButton) {
+    // LOGD(" ButtonClick Print_layer_back !!!\n");
+	mprint_finishPtr->setVisible(false);
+	mboardsdPtr->setVisible(true);
+    return false;
+}
+
+static int getListItemCount_ListViewWifiInfo(const ZKListView *pListView) {
+    //LOGD("getListItemCount_ListViewWifiInfo !\n");
+	LOGD("WiFi_Info.size():%d",WiFi_Info.size());
+    return WiFi_Info.size();
+}
+
+static void obtainListItemData_ListViewWifiInfo(ZKListView *pListView,ZKListView::ZKListItem *pListItem, int index) {
+    //LOGD(" obtainListItemData_ ListViewWifiInfo  !!!\n");
+	ZKListView::ZKListSubItem *pLevelItem = pListItem->findSubItemByID(ID_GCODE_LISTSUBITEM_LEVEL);//信号强度图片
+	ZKListView::ZKListSubItem *pNameItem = pListItem->findSubItemByID(ID_GCODE_LISTSUBITEM_NAME);//wifi名字
+	ZKListView::ZKListSubItem *pSubItem = pListItem->findSubItemByID(ID_GCODE_LISTSUBITEM_SUB);//加密方式
+	ZKListView::ZKListSubItem *WIFI_IP = pListItem->findSubItemByID(ID_GCODE_WIFI_IP);//显示ip
+	ZKListView::ZKListSubItem *WIFI_freq = pListItem->findSubItemByID(ID_GCODE_WIFI_freq);//频率
+
+	//设置wifi2.4G/5G
+	if(WiFi_Info[index].freq > 4000){
+		WIFI_freq->setText("5G");
+	}else
+	{
+		WIFI_freq->setText("2.4G");
+	}
+
+	//wifi名字
+	pNameItem->setText(WiFi_Info[index].ssid);//wifi名字
+
+	//是否已经连接
+	if(!WiFi_Info[index].ip.empty())
+	{
+//		 LOGD("IP:%s",WiFi_Info[index].ip.c_str());
+
+		pNameItem->setSelected(true);//wifi名字变色
+		pSubItem->setTextTr("connected");//安全性那里显示已连接
+		//显示已连接的wifi ip
+		WIFI_IP->setText(WiFi_Info[index].ip);//显示当前机器ip
+
+		// //屏幕设置界面的wifi名字
+		// mTextView27Ptr->setText(WiFi_Info[index].ssid);//wifi名字
+
+		// //屏幕设置界面的ip地址
+		// mTextView28Ptr->setText(WiFi_Info[index].ip);//wifi名字
+
+
+
+	} else {
+		pNameItem->setSelected(false);//wifi名字不变色
+		WIFI_IP->setText("");//不显示当前机器ip
+
+		//如果没有加密
+		if( WiFi_Info[index].security.empty() )
+		{
+			pSubItem->setTextTr("Open WiFi");//显示加密方式
+		}else{//有加密
+			pSubItem->setText(WiFi_Info[index].security);//显示加密方式
+		}
+	}
+
+//根据wifi 信号强度/加密方式 设置wifi强度图标
+	int wifi_signal = abs(WiFi_Info[index].signal / 51);//0-20 /21 =0   20-40/21 = 1
+//	LOGD("PIC:%d,%d",wifi_signal,WiFi_Info[index].signal);
+	char buf[32];
+	//如果没有加密
+	if( WiFi_Info[index].security.empty() )
+	{
+		snprintf(buf,sizeof(buf),"wifi/wifi_%d.png",4-wifi_signal);
+	}else{//有加密
+		snprintf(buf,sizeof(buf),"wifi/wifi_a%d.png",4-wifi_signal);
+	}
+	pLevelItem->setBackgroundPic(buf);
+//wifi强度图标显示完成
+
+
+
+
+}
+
+static void onListItemClick_ListViewWifiInfo(ZKListView *pListView, int index, int id) {
+    //LOGD(" onListItemClick_ ListViewWifiInfo  !!!\n");
+	if(!WiFi_Info[index].ip.empty())
+	{
+		mWindowDisconnectPtr->setVisible(true);
+		mTextConnectSecTypePtr->setText(WiFi_Info[index].security);//显示加密方式
+		mTextConnectSsidPtr->setText(WiFi_Info[index].ssid);//wifi名字
+
+	}else{
+		//如果没有密码就不显示输入密码那些框
+		if( WiFi_Info[index].security.empty() )
+		{
+			mTextview9Ptr->setVisible(false);
+			mEdittextPwdPtr->setVisible(false);
+			mButtonShowPwdPtr->setVisible(false);
+		}else
+		{
+			mTextview9Ptr->setVisible(true);
+			mEdittextPwdPtr->setVisible(true);
+			mButtonShowPwdPtr->setVisible(true);
+		}
+		std::string password = StoragePreferences::getString(WiFi_Info[index].ssid,"");
+		mEdittextPwdPtr->setText(password);//显示密码
+		mWindowSetPtr->setVisible(true);
+		mTextSecTypePtr->setText(WiFi_Info[index].security);//显示加密方式
+		mTextSsidPtr->setText(WiFi_Info[index].ssid);//wifi名字
+	}
+
+}
+
+static bool onButtonClick_ButtonConnect(ZKButton *pButton) {
+//    LOGD(" ButtonClick ButtonConnect !!!\n");
+	char *ssid= nullptr;
+	char *pwd=nullptr;
+	char buf[64]={0};
+
+	ssid = mTextSsidPtr->getText().c_str();
+	pwd = mEdittextPwdPtr->getText().c_str();
+
+	if(ssid &&pwd){
+		sprintf(buf,"M587 S\"%s\" P\"%s\" F1\r\n",ssid,pwd);
+
+		Hardware_serial_transmission("M552 S0\r\n");
+		Hardware_serial_transmission(buf);
+		sprintf(buf,"M552 S1 P\"%s\"\r\n",ssid);
+		Hardware_serial_transmission(buf);
+		mWindowSetPtr->setVisible(false);
+
+		m552_s1_time=0;
+		m552_s1=true;
+	}
+	
+    return false;
+}
+
+static void onEditTextChanged_EdittextPwd(const std::string &text) {
+    //LOGD(" onEditTextChanged_ EdittextPwd %s !!!\n", text.c_str());
+}
+
+static bool onButtonClick_ButtonShowPwd(ZKButton *pButton) {
+//    LOGD(" ButtonClick ButtonShowPwd !!!\n");
+	if(pButton->isSelected()) mEdittextPwdPtr->setPassword(true);
+	else mEdittextPwdPtr->setPassword(false);
+
+	pButton->setSelected(!pButton->isSelected());
+    return false;
+}
+
+static bool onButtonClick_Buttonautoconnect(ZKButton *pButton) {
+    LOGD(" ButtonClick Buttonautoconnect !!!\n");
+    return false;
+}
+
+static bool onButtonClick_ButtonDisconnect(ZKButton *pButton) {
+    LOGD(" ButtonClick ButtonDisconnect !!!\n");
+    return false;
+}
+
+static bool onButtonClick_ButtonForget(ZKButton *pButton) {
+    // LOGD(" ButtonClick ButtonForget !!!\n");
+	std::string ssid = mTextConnectSsidPtr->getText();
+
+	char buf[64]={0};
+	sprintf(buf,"M552 S0\r\n588 S\"%s\"\r\n",ssid.c_str());
+	Hardware_serial_transmission(buf);
+	mWindowDisconnectPtr->setVisible(false);
+	StoragePreferences::remove(ssid);
+	for(int i=0;i<WiFi_Info.size();i++){
+		if(WiFi_Info[i].ssid == ssid){
+			WiFi_Info[i].ip = "";
+			mListViewWifiInfoPtr->refreshListView();
+			break;
+		}
+	}
+
+
+    return false;
+}
+static bool onButtonClick_Button52(ZKButton *pButton) {
+    LOGD(" ButtonClick Button52 !!!\n");
+    return false;
+}
+static bool onButtonClick_Button_refresh(ZKButton *pButton) {
+//    LOGD(" ButtonClick Button_refresh !!!\n");
+
+ 	 m587_1_time = 0;
+	 m587_1=true;
+//	 UARTCONTEXT->send((const unsigned char*)"M587.1\r\n", strlen("M587.1\r\n"));
+	 Hardware_serial_transmission("M552 S0\r\n");
+		if(mButton_openAPPtr->isSelected()){
+			mEditText_APssidPtr->setInvalid(false);
+			mEditText_APpasswordPtr->setInvalid(false);
+			mEditText_APipPtr->setInvalid(false);
+			mButton_openAPPtr->setSelected(false);
+		}
+
+	 Hardware_serial_transmission("M587.1\r\n");
+
+    return false;
+}
+static void onEditTextChanged_EditText_APssid(const std::string &text) {
+    //LOGD(" onEditTextChanged_ EditText_APssid %s !!!\n", text.c_str());
+}
+
+static void onEditTextChanged_EditText_APpassword(const std::string &text) {
+    //LOGD(" onEditTextChanged_ EditText_APpassword %s !!!\n", text.c_str());
+}
+
+static void onEditTextChanged_EditText_APip(const std::string &text) {
+    //LOGD(" onEditTextChanged_ EditText_APip %s !!!\n", text.c_str());
+}
+static bool onButtonClick_Button_openAP(ZKButton *pButton) {
+//    LOGD(" ButtonClick Button_openAP !!!\n");
+
+	if(!pButton->isSelected()){
+		Hardware_serial_transmission("M552 S0\r\n");
+
+		std::string ssid = mEditText_APssidPtr->getText();
+		std::string pwd = mEditText_APpasswordPtr->getText();
+		std::string ip = mEditText_APipPtr->getText();
+
+		char buf[64]={0};
+		sprintf(buf,"M589 S\"%s\" P\"%s\" I%s\r\n",ssid.c_str(),pwd.c_str(),ip.c_str());
+
+		Hardware_serial_transmission(buf);
+		m589=true;
+		m589_time=0;
+		StoragePreferences::putString("AP_ssid",ssid);
+		StoragePreferences::putString("AP_pwd",pwd);
+		StoragePreferences::putString("AP_ip",ip);
+	}
+	else{
+		Hardware_serial_transmission("M552 S0\r\n");
+
+		mEditText_APssidPtr->setInvalid(false);
+		mEditText_APpasswordPtr->setInvalid(false);
+		mEditText_APipPtr->setInvalid(false);
+
+		pButton->setSelected(false);
+		pButton->setTextTr("OpenAP");
+	}
+
+
+
+
+    return false;
+}
+static bool onButtonClick_Button_mode_change(ZKButton *pButton) {
+//    LOGD(" ButtonClick Button_mode_change !!!\n");
+
+	if(mButton_openAPPtr->isSelected()){
+		mMessage_ReportPtr->setText("Please close AP first.");
+		mMessage_ReportPtr->setVisible(true);
+		mMessage_ReportPtr->setVisible(true);
+		mMessage_Report_ClosePtr->setVisible(true);
+		Message_Report_Switch = 1;
+
+		return false;
+
+	}
+
+	if(!pButton->isSelected()){
+		mHost_computer_wifiPtr->setVisible(false);
+		mButton_refreshPtr->setVisible(false);
+
+		mwinAPmodePtr->setVisible(true);
+		pButton->setText("clientMode");
+
+	}
+	else{
+
+		mwinAPmodePtr->setVisible(false);
+		
+		mHost_computer_wifiPtr->setVisible(true);
+		mButton_refreshPtr->setVisible(true);
+		pButton->setText("APMode");
+		if(WiFi_Info.size() <= 0)onButtonClick_Button_refresh(mButton_refreshPtr);
+	}
+	pButton->setSelected(!pButton->isSelected());
 
     return false;
 }

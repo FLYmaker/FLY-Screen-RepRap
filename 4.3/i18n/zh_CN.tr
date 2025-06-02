@@ -102,6 +102,25 @@
     <string name="Please click to enter the power-on password">请输入开机密码</string>
     <string name="Confirm">确认</string>
     <string name="Round">圆形</string>
+
+    <string name="back">返回</string>
+    <string name="print_again">再次打印</string>
+    <string name="Print_Finish">打印完成</string>    
+
+    <string name="Confirm the execution of the macro file?">确定执行宏文件?</string>
+    <string name="show password">显示密码</string>
+    <string name="connect">连接</string>
+    <string name="connected">已连接</string>
+    <string name="wifi name">wifi名称:</string>
+    <string name="wifi Encryption">加密方式:</string>
+    <string name="wifi password">wifi密码:</string>
+    <string name="Connection Status">连接状态:</string>
+    <string name="Forget">忘记</string>
+    <string name="Scan">扫描</string>
+    <string name="OpenAP">打开热点</string>
+    <string name="CloseAP">关闭热点</string>
+
+    
 </resources>
 
 
