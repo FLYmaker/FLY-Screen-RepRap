@@ -100,6 +100,25 @@
 <string name="Please click to enter the power-on password">Please click to enter the power-on password</string>
 <string name="Confirm">Confirm</string>
 <string name="Round">Round</string>
+
+
+<string name="back">back</string>
+<string name="print_again">print again</string>
+<string name="Print_Finish">Print Finish</string>    
+
+<string name="Confirm the execution of the macro file?">Confirm the execution of the macro file?</string>
+<string name="show password">show password</string>
+<string name="connect">connect</string>
+<string name="connected">connected</string>
+<string name="wifi name">wifi name:</string>
+<string name="wifi Encryption">wifi Encryption:</string>
+<string name="wifi password">wifi password:</string>
+<string name="Connection Status">Connection Status:</string>
+<string name="Forget">Forget</string>
+<string name="Scan">Scan</string>
+<string name="OpenAP">OpenAP</string>
+<string name="CloseAP">CloseAP</string>
+
 </resources>
 
 

@@ -133,9 +133,27 @@ void make_thumbnail(std::string base64_data){
 			    // 保存为 PNG 文件
 			    if (save_png_from_base64(base64_data, output_file)) {
 
-			       LOGD("PNG file saved successfully: ");
+			       LOGD("1PNG file saved successfully: ");
 			    } else {
-			    	LOGD("Failed to save PNG file.");
+			    	LOGD("1Failed to save PNG file.");
+			    }
+			}
+
+}
+
+void make_thumbnail(std::string base64_data,std::string name){
+//			std::string base64_data = extract_base64_data(file);
+			if(!base64_data.empty()){
+			    // 输出文件路径
+			    std::string output_file = "/tmp/" + name + ".png";
+
+			    // 保存为 PNG 文件
+			    if (save_png_from_base64(base64_data, output_file)) {
+
+			       LOGD("2PNG file saved successfully: %s",output_file.c_str());
+			    } else {
+			    	LOGD("2Failed to save PNG file:%s.\r\n",output_file.c_str());
+			        std::cerr << "Failed to save PNG file." << std::endl;
 			    }
 			}
 
