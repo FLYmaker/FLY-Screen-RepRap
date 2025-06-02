@@ -25,4 +25,5 @@ public:
 };
 extern bool can_run;
 void make_thumbnail(std::string file);
+extern void make_thumbnail(std::string base64_data,std::string name);
 #endif /* JNI_LOGIC_THUMBNAIL_H_ */
